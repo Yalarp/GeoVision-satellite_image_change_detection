@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Satellite Map Viewer</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="bg-gray-900 text-white">
+    <div class="container">
+        <div class="header">
+            <h1>Satellite Data Viewer</h1>
+            <p>Exploring the Earth from Above</p>
+        </div>
+
+        <div class="controls">
+            <label for="start-date">Start Date:</label>
+            <input type="date" id="start-date">
+
+            <label for="end-date">End Date:</label>
+            <input type="date" id="end-date">
+
+            <div>
+                <button id="get-data" class="btn">Get Images</button>
+                <button id="visualize-data" class="btn">Generate Timelapse GIF</button>
+                <button id="generate-video" class="btn">Generate Video</button>
+                <button id="download-shapefile" class="btn">Download Shapefile</button>
+                <button id="download-kml" class="btn">Download KML</button>
+            </div>
+        </div>
+
+        <div id="loading" class="hidden">
+            <div class="spinner"></div>
+            <p>Processing your request... This may take a minute.</p>
+        </div>
+
+        <div id="map"></div>
+
+        <!-- Media Gallery -->
+        <div id="media-gallery" class="mt-10">
+            <h2 class="text-2xl font-bold mb-4 text-blue-400">Media Gallery</h2>
+
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="images">Images</button>
+                <button class="tab-btn" data-tab="timelapse">Timelapse</button>
+                <button class="tab-btn" data-tab="video">Video</button>
+            </div>
+
+            <div class="tab-content">
+                <!-- Images Tab -->
+                <div id="images-tab" class="tab-pane active">
+                    <div id="image-container" class="image-container">
+                        <p class="text-gray-400 italic">Select a region on the map, set the dates, then click "Get
+                            Images" to view satellite imagery.</p>
+                    </div>
+                </div>
+
+                <!-- Timelapse Tab -->
+                <div id="timelapse-tab" class="tab-pane">
+                    <div id="timelapse-container" class="media-container">
+                        <p class="text-gray-400 italic mb-4">Generate a timelapse GIF by clicking the "Generate
+                            Timelapse GIF" button.</p>
+                        <img id="timelapse-gif" src="" alt="Timelapse GIF" class="hidden" loop="infinite">
+                        <div class="media-controls">
+                            <button id="download-gif" class="download-btn" disabled>
+                                <i class="fas fa-download"></i> Download GIF
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Video Tab -->
+                <div id="video-tab" class="tab-pane">
+                    <div id="video-container" class="media-container">
+                        <p class="text-gray-400 italic mb-4">Generate a video by clicking the "Generate Video" button.
+                        </p>
+                        <video id="timelapse-video" controls class="hidden">
+                            <source src="" type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
+                        <div class="media-controls">
+                            <button id="download-video" class="download-btn" disabled>
+                                <i class="fas fa-download"></i> Download MP4
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+    <script>
+        // Prevent form submission on all buttons
+        document.querySelectorAll(".btn").forEach(button => {
+            button.addEventListener("click", function (event) {
+                event.preventDefault(); // Prevent form submission
+            });
+        });
+
+        // Show media gallery section initially
+        document.getElementById("media-gallery").classList.remove("hidden");
+
+        // Initialize Map
+        var map = L.map('map').setView([20.5937, 78.9629], 5); // Default to India
+
+        // Add Base Layers
+        var baseLayers = {
+            "OpenStreetMap": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }),
+            "Esri Satellite": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+            }),
+            "Google Streets": L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+                maxZoom: 20,
+                subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+            }),
+            "Google Hybrid": L.tileLayer('https://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}', {
+                maxZoom: 20,
+                subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+            }),
+            "Google Satellite": L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                maxZoom: 20,
+                subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+            }),
+            "Google Terrain": L.tileLayer('https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', {
+                maxZoom: 20,
+                subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+            })
+        };
+
+        // Add Location Search Tool
+        L.Control.geocoder({
+            defaultMarkGeocode: true,
+            collapsed: false, // Keep the search bar open by default
+            placeholder: "Search for a location..."
+        }).addTo(map);
+
+        // Add Base Layers to Map
+        L.control.layers(baseLayers, {}, { position: 'topright' }).addTo(map);
+        baseLayers["Google Hybrid"].addTo(map); // Default to Google Hybrid
+
+        // Add Draw Control
+        var drawnItems = new L.FeatureGroup();
+        map.addLayer(drawnItems);
+
+        var drawControl = new L.Control.Draw({
+            edit: { featureGroup: drawnItems },
+            draw: {
+                polygon: true,
+                marker: false,
+                circle: false,
+                rectangle: true,
+                polyline: false
+            }
+        });
+        map.addControl(drawControl);
+
+        // Store fetched images
+        let fetchedImages = [];
+
+        // Capture Draw Event
+        map.on('draw:created', function (e) {
+            // Clear previous drawings
+            drawnItems.clearLayers();
+
+            var layer = e.layer;
+            drawnItems.addLayer(layer);
+            console.log("Polygon Coordinates:", layer.getLatLngs());
+        });
+
+        // Show/hide loading indicator
+        function showLoading(show) {
+            document.getElementById("loading").classList.toggle("hidden", !show);
+        }
+
+        // Display error message
+        function showError(message) {
+            // Remove any existing error message
+            const existingError = document.querySelector(".error-message");
+            if (existingError) {
+                existingError.remove();
+            }
+
+            // Create new error message
+            const errorDiv = document.createElement("div");
+            errorDiv.className = "error-message text-red-500 font-bold mb-4";
+            errorDiv.textContent = message;
+
+            // Add after controls
+            const controls = document.querySelector(".controls");
+            controls.parentNode.insertBefore(errorDiv, controls.nextSibling);
+        }
+
+        // Check if inputs are valid
+        function validateInputs() {
+            const startDate = document.getElementById("start-date").value;
+            const endDate = document.getElementById("end-date").value;
+            const drawnLayers = drawnItems.getLayers();
+
+            if (!startDate || !endDate) {
+                showError("Please select both start and end dates!");
+                return false;
+            }
+
+            if (drawnLayers.length === 0) {
+                showError("Please draw a polygon or rectangle on the map!");
+                return false;
+            }
+
+            return true;
+        }
+
+        // Get polygon GeoJSON
+        function getPolygonGeoJSON() {
+            return drawnItems.getLayers()[0].toGeoJSON();
+        }
+
+        // Tab functionality
+        document.querySelectorAll('.tab-btn').forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.preventDefault(); // Prevent default behavior
+
+                // Remove active class from all buttons and panes
+                document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+
+                // Add active class to clicked button
+                button.classList.add('active');
+
+                // Show corresponding pane
+                const tabId = button.getAttribute('data-tab');
+                document.getElementById(`${tabId}-tab`).classList.add('active');
+            });
+        });
+
+        // Add this function to load existing images from the static folder
+        function loadExistingImages() {
+            // Clear any existing images
+            document.getElementById("image-container").innerHTML = "";
+
+            // Show loading indicator
+            showLoading(true);
+
+            // Fetch the list of existing images from the server
+            fetch("http://127.0.0.1:5000/list_existing_images")
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Server returned " + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    showLoading(false);
+
+                    if (data.images && data.images.length > 0) {
+                        // Store fetched images for later use
+                        fetchedImages = data.images;
+
+                        // Switch to images tab
+                        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+                        document.querySelector('[data-tab="images"]').classList.add('active');
+                        document.getElementById("images-tab").classList.add('active');
+
+                        // Populate image container
+                        const container = document.getElementById("image-container");
+                        container.innerHTML = "";
+
+                        data.images.forEach(imgFilename => {
+                            const imgContainer = document.createElement("div");
+                            imgContainer.className = "image-item";
+
+                            const img = document.createElement("img");
+                            img.src = "http://127.0.0.1:5000/static/" + imgFilename;
+                            img.alt = "Satellite Image " + imgFilename;
+                            img.className = "satellite-image";
+
+                            const caption = document.createElement("div");
+                            caption.className = "image-caption";
+                            caption.textContent = imgFilename.replace(".png", "");
+
+                            imgContainer.appendChild(img);
+                            imgContainer.appendChild(caption);
+                            container.appendChild(imgContainer);
+                        });
+
+                        // Enable the timelapse buttons if we have images
+                        document.getElementById("visualize-data").disabled = false;
+                        document.getElementById("generate-video").disabled = false;
+                    } else {
+                        // Display the warning message in the gallery section
+                        const gallerySection = document.getElementById("media-gallery");
+                        const warningMessage = document.createElement("div");
+                        warningMessage.className = "error-message";
+                        warningMessage.textContent = "No existing images found in the static folder.";
+                        gallerySection.appendChild(warningMessage);
+                    }
+
+                    // Check for timelapse.gif
+                    if (data.additional_files && data.additional_files.timelapse_gif) {
+                        document.getElementById("timelapse-gif").src = "http://127.0.0.1:5000/static/timelapse.gif";
+                        document.getElementById("timelapse-gif").classList.remove("hidden");
+                        document.getElementById("download-gif").disabled = false;
+                    }
+
+                    // Check for timelapse.mp4
+                    if (data.additional_files && data.additional_files.timelapse_video) {
+                        document.getElementById("timelapse-video").src = "http://127.0.0.1:5000/static/timelapse.mp4";
+                        document.getElementById("timelapse-video").classList.remove("hidden");
+                        document.getElementById("download-video").disabled = false;
+                    }
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError("Error loading existing images: " + error.message);
+                    console.error("Error loading existing images:", error);
+                });
+        }
+
+
+        // Add a "Load Existing Images" button to the controls div
+        function addLoadExistingButton() {
+            const controlsDiv = document.querySelector(".controls > div");
+
+            if (controlsDiv) {
+                const loadButton = document.createElement("button");
+                loadButton.id = "load-existing";
+                loadButton.className = "btn";
+                loadButton.textContent = "Load Existing Images";
+                loadButton.addEventListener("click", function (event) {
+                    event.preventDefault();
+                    loadExistingImages();
+                });
+
+                // Insert as the first button
+                controlsDiv.insertBefore(loadButton, controlsDiv.firstChild);
+            }
+        }
+
+        // Call this when the page loads
+        document.addEventListener("DOMContentLoaded", function () {
+            addLoadExistingButton();
+
+            // Try to automatically load images when the page loads
+            loadExistingImages();
+        });
+
+        // Add this function to enable image enlargement on click
+        function setupImageEnlargement() {
+            // Create modal elements if they don't exist
+            if (!document.getElementById('image-modal')) {
+                const modal = document.createElement('div');
+                modal.id = 'image-modal';
+                modal.className = 'image-modal';
+                modal.style.display = 'none';
+
+                const closeBtn = document.createElement('span');
+                closeBtn.className = 'close-modal';
+                closeBtn.innerHTML = '&times;';
+                closeBtn.onclick = function () {
+                    modal.style.display = 'none';
+                };
+
+                const modalImg = document.createElement('img');
+                modalImg.className = 'modal-content';
+                modalImg.id = 'enlarged-image';
+
+                modal.appendChild(closeBtn);
+                modal.appendChild(modalImg);
+                document.body.appendChild(modal);
+
+                // Close modal when clicking outside the image
+                modal.onclick = function (event) {
+                    if (event.target === modal) {
+                        modal.style.display = 'none';
+                    }
+                };
+            }
+
+            // Add click event to all satellite images
+            document.querySelectorAll('.satellite-image').forEach(img => {
+                img.onclick = function () {
+                    const modal = document.getElementById('image-modal');
+                    const modalImg = document.getElementById('enlarged-image');
+                    modal.style.display = 'flex';
+                    modalImg.src = this.src;
+                };
+            });
+        }
+
+        // Modify the loadExistingImages function to call setupImageEnlargement
+        // Add this line at the end of the .then(data => {...}) block in loadExistingImages:
+        // setupImageEnlargement();
+
+        // Or alternatively, use a MutationObserver to detect when images are added
+        const imageContainerObserver = new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    setupImageEnlargement();
+                }
+            });
+        });
+
+        // Start observing the image container for changes
+        document.addEventListener('DOMContentLoaded', function () {
+            const imageContainer = document.getElementById('image-container');
+            if (imageContainer) {
+                imageContainerObserver.observe(imageContainer, { childList: true });
+            }
+        });
+
+        // Get Images button click handler
+        document.getElementById("get-data").addEventListener("click", function (event) {
+            event.preventDefault(); // Prevent form submission
+            if (!validateInputs()) return;
+
+            const startDate = document.getElementById("start-date").value;
+            const endDate = document.getElementById("end-date").value;
+            const polygon = getPolygonGeoJSON();
+
+            showLoading(true);
+            document.getElementById("image-container").innerHTML = "";
+
+            fetch("http://127.0.0.1:5000/get_images", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    polygon: polygon.geometry.coordinates,
+                    start_date: startDate,
+                    end_date: endDate
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Server returned " + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    showLoading(false);
+
+                    if (data.images && data.images.length > 0) {
+                        // Store fetched images for later use
+                        fetchedImages = data.images;
+
+                        // Switch to images tab
+                        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+                        document.querySelector('[data-tab="images"]').classList.add('active');
+                        document.getElementById("images-tab").classList.add('active');
+
+                        // Populate image container
+                        const container = document.getElementById("image-container");
+                        container.innerHTML = "";
+
+                        data.images.forEach(imgFilename => {
+                            const imgContainer = document.createElement("div");
+                            imgContainer.className = "image-item";
+
+                            const img = document.createElement("img");
+                            img.src = "http://127.0.0.1:5000/static/" + imgFilename;
+                            img.alt = "Satellite Image " + imgFilename;
+                            img.className = "satellite-image";
+
+                            const caption = document.createElement("div");
+                            caption.className = "image-caption";
+                            caption.textContent = imgFilename.replace(".png", "");
+
+                            imgContainer.appendChild(img);
+                            imgContainer.appendChild(caption);
+                            container.appendChild(imgContainer);
+                        });
+                    } else {
+                        showError("No images found for the given date range and area.");
+                    }
+
+                    // Handle additional files
+                    if (data.additional_files && data.additional_files.timelapse_gif) {
+                        document.getElementById("timelapse-gif").src = "http://127.0.0.1:5000/static/timelapse.gif";
+                        document.getElementById("timelapse-gif").classList.remove("hidden");
+                        document.getElementById("download-gif").disabled = false;
+                    }
+
+                    if (data.additional_files && data.additional_files.timelapse_video) {
+                        document.getElementById("timelapse-video").src = "http://127.0.0.1:5000/static/timelapse.mp4";
+                        document.getElementById("timelapse-video").classList.remove("hidden");
+                        document.getElementById("download-video").disabled = false;
+                    }
+
+                    if (data.additional_files && data.additional_files.kml) {
+                        document.getElementById("download-kml").disabled = false;
+                    }
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError("Error fetching images: " + error.message);
+                    console.error("Error fetching images:", error);
+                });
+        });
+
+        // Generate Timelapse GIF button click handler
+        document.getElementById("visualize-data").addEventListener("click", function (event) {
+            event.preventDefault(); // Prevent form submission
+            if (fetchedImages.length > 0) {
+                // Use existing images
+                generateTimelapseFromExisting();
+            } else if (validateInputs()) {
+                // Need to fetch images first
+                generateTimelapseFromScratch();
+            }
+        });
+
+        function generateTimelapseFromExisting() {
+            showLoading(true);
+
+            const polygon = getPolygonGeoJSON();
+            const startDate = document.getElementById("start-date").value;
+            const endDate = document.getElementById("end-date").value;
+
+            fetch("http://127.0.0.1:5000/generate_timelapse", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    polygon: polygon.geometry.coordinates,
+                    start_date: startDate,
+                    end_date: endDate,
+                    existing_images: fetchedImages
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Server returned " + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    showLoading(false);
+
+                    if (data.success && data.gif_url) {
+                        // Switch to timelapse tab
+                        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+                        document.querySelector('[data-tab="timelapse"]').classList.add('active');
+                        document.getElementById("timelapse-tab").classList.add('active');
+
+                        // Show GIF with timestamp parameter to prevent caching
+                        const gifImg = document.getElementById("timelapse-gif");
+                        gifImg.src = `http://127.0.0.1:5000${data.gif_url}?t=${new Date().getTime()}`;
+                        gifImg.classList.remove("hidden");
+                        gifImg.setAttribute('loop', '');
+                        document.getElementById("download-gif").disabled = false;
+                    } else {
+                        showError("Failed to generate timelapse GIF.");
+                    }
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError("Error generating timelapse GIF: " + error.message);
+                    console.error("Error generating timelapse GIF:", error);
+                });
+        }
+
+        function generateTimelapseFromScratch() {
+            const startDate = document.getElementById("start-date").value;
+            const endDate = document.getElementById("end-date").value;
+            const polygon = getPolygonGeoJSON();
+
+            showLoading(true);
+
+            fetch("http://127.0.0.1:5000/generate_timelapse", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    polygon: polygon.geometry.coordinates,
+                    start_date: startDate,
+                    end_date: endDate
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Server returned " + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    showLoading(false);
+
+                    if (data.success && data.gif_url) {
+                        // Store fetched images for later use
+                        if (data.images) {
+                            fetchedImages = data.images;
+                        }
+
+                        // Switch to timelapse tab
+                        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+                        document.querySelector('[data-tab="timelapse"]').classList.add('active');
+                        document.getElementById("timelapse-tab").classList.add('active');
+
+                        // Show GIF with timestamp parameter to prevent caching
+                        const gifImg = document.getElementById("timelapse-gif");
+                        gifImg.src = `http://127.0.0.1:5000${data.gif_url}?t=${new Date().getTime()}`;
+                        gifImg.classList.remove("hidden");
+                        gifImg.loop = true;
+                        document.getElementById("download-gif").disabled = false;
+                    } else {
+                        showError("Failed to generate timelapse GIF.");
+                    }
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError("Error generating timelapse GIF: " + error.message);
+                    console.error("Error generating timelapse GIF:", error);
+                });
+        }
+
+        // Generate Video button click handler
+        document.getElementById("generate-video").addEventListener("click", function (event) {
+            event.preventDefault(); // Prevent form submission
+            if (fetchedImages.length > 0) {
+                // Use existing images
+                generateVideoFromExisting();
+            } else if (validateInputs()) {
+                // Need to fetch images first
+                generateVideoFromScratch();
+            }
+        });
+
+        function generateVideoFromExisting() {
+            showLoading(true);
+
+            const polygon = getPolygonGeoJSON();
+            const startDate = document.getElementById("start-date").value;
+            const endDate = document.getElementById("end-date").value;
+
+            fetch("http://127.0.0.1:5000/generate_video", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    polygon: polygon.geometry.coordinates,
+                    start_date: startDate,
+                    end_date: endDate,
+                    existing_images: fetchedImages
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Server returned " + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    showLoading(false);
+
+                    if (data.success && data.video_url) {
+                        // Switch to video tab
+                        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+                        document.querySelector('[data-tab="video"]').classList.add('active');
+                        document.getElementById("video-tab").classList.add('active');
+
+                        // Show video with timestamp parameter to prevent caching
+                        const videoElem = document.getElementById("timelapse-video");
+                        videoElem.src = `http://127.0.0.1:5000${data.video_url}?t=${new Date().getTime()}`;
+                        videoElem.classList.remove("hidden");
+                        document.getElementById("download-video").disabled = false;
+                    } else {
+                        showError("Failed to generate video.");
+                    }
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError("Error generating video: " + error.message);
+                    console.error("Error generating video:", error);
+                });
+        }
+
+        function generateVideoFromScratch() {
+            const startDate = document.getElementById("start-date").value;
+            const endDate = document.getElementById("end-date").value;
+            const polygon = getPolygonGeoJSON();
+
+            showLoading(true);
+
+            fetch("http://127.0.0.1:5000/generate_video", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    polygon: polygon.geometry.coordinates,
+                    start_date: startDate,
+                    end_date: endDate
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Server returned " + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    showLoading(false);
+
+                    if (data.success && data.video_url) {
+                        // Store fetched images for later use
+                        if (data.images) {
+                            fetchedImages = data.images;
+                        }
+
+                        // Switch to video tab
+                        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+                        document.querySelector('[data-tab="video"]').classList.add('active');
+                        document.getElementById("video-tab").classList.add('active');
+
+                        // Show video with timestamp parameter to prevent caching
+                        const videoElem = document.getElementById("timelapse-video");
+                        videoElem.src = `http://127.0.0.1:5000${data.video_url}?t=${new Date().getTime()}`;
+                        videoElem.classList.remove("hidden");
+                        document.getElementById("download-video").disabled = false;
+                    } else {
+                        showError("Failed to generate video.");
+                    }
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError("Error generating video: " + error.message);
+                    console.error("Error generating video:", error);
+                });
+        }
+
+        // Modified Download buttons
+        document.getElementById("download-gif").addEventListener("click", function (event) {
+            event.preventDefault();
+            window.open("http://127.0.0.1:5000/download_media?type=gif", "_blank");
+        });
+
+        document.getElementById("download-video").addEventListener("click", function (event) {
+            event.preventDefault();
+            window.open("http://127.0.0.1:5000/download_media?type=video", "_blank");
+        });
+
+        document.getElementById("download-shapefile").addEventListener("click", function (event) {
+            event.preventDefault(); // Prevent form submission
+            if (!validateInputs()) return;
+
+            const polygon = getPolygonGeoJSON();
+
+            showLoading(true);
+
+            fetch("http://127.0.0.1:5000/download_shapefile", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    polygon: polygon.geometry.coordinates
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Server returned " + response.status);
+                    }
+                    return response.blob();
+                })
+                .then(blob => {
+                    showLoading(false);
+
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.style.display = "none";
+                    a.href = url;
+                    a.download = "polygon_shapefile.zip";
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError("Error downloading shapefile: " + error.message);
+                    console.error("Error downloading shapefile:", error);
+                });
+        });
+
+        document.getElementById("download-kml").addEventListener("click", function (event) {
+            event.preventDefault(); // Prevent form submission
+            if (!validateInputs()) return;
+
+            const polygon = getPolygonGeoJSON();
+
+            showLoading(true);
+
+            fetch("http://127.0.0.1:5000/download_kml", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    polygon: polygon.geometry.coordinates
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Server returned " + response.status);
+                    }
+                    return response.blob();
+                })
+                .then(blob => {
+                    showLoading(false);
+
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.style.display = "none";
+                    a.href = url;
+                    a.download = "polygon.kml";
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError("Error downloading KML: " + error.message);
+                    console.error("Error downloading KML:", error);
+                });
+        });
+    </script>
+</body>
+
+</html>
