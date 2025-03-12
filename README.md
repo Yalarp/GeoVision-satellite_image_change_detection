@@ -115,10 +115,3 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 For any questions or support, please contact [2706pralay@gmail.com](mailto:2706pralay@gmail.com).
 ```
-
-### Instructions
-
-1. Save the above content in a file named `README.md` in the root directory of your project.
-2. Update the placeholders like `your-username`, `your-email@example.com`, and any other specific details as needed.
-
-This `README.md` file provides a comprehensive overview of your project, making it easier for users to understand, install, and use the Satellite Data Viewer application.
