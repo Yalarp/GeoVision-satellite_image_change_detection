@@ -28,7 +28,6 @@
             <input type="date" id="end-date">
 
             <div>
-                <button id="load-existing" class="btn">Load Existing Images</button>
                 <button id="get-data" class="btn">Get Images</button>
                 <button id="visualize-data" class="btn">Generate Timelapse GIF</button>
                 <button id="generate-video" class="btn">Generate Video</button>
@@ -99,7 +98,8 @@
                 <!-- PDF Report Tab -->
                 <div id="report-tab" class="tab-pane">
                     <div id="report-container" class="media-container">
-                        <p class="text-gray-400 italic mb-4">Generate a PDF report showing before and after analysis by clicking the "Generate PDF Report" button.</p>
+                        <p class="text-gray-400 italic mb-4">Generate a PDF report showing before and after analysis by
+                            clicking the "Generate PDF Report" button.</p>
                         <iframe id="pdf-viewer" src="" width="100%" height="600px" class="hidden"></iframe>
                         <div class="media-controls">
                             <button id="download-report" class="download-btn" disabled>
@@ -349,24 +349,7 @@
                 });
         }
 
-        // Add a "Load Existing Images" button to the controls div
-        function addLoadExistingButton() {
-            const controlsDiv = document.querySelector(".controls > div");
 
-            if (controlsDiv) {
-                const loadButton = document.createElement("button");
-                loadButton.id = "load-existing";
-                loadButton.className = "btn";
-                loadButton.textContent = "Load Existing Images";
-                loadButton.addEventListener("click", function (event) {
-                    event.preventDefault();
-                    loadExistingImages();
-                });
-
-                // Insert as the first button
-                controlsDiv.insertBefore(loadButton, controlsDiv.firstChild);
-            }
-        }
 
         // Call this when the page loads
         document.addEventListener("DOMContentLoaded", function () {
