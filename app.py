@@ -841,10 +841,13 @@ def generate_report():
     report_path = generate_pdf_report(image_filenames, polygon, start_date, end_date)
 
     if report_path and os.path.exists(report_path):
-        return jsonify({
-            "success": True,
-            "report_url": "/static/satellite_report.pdf"
-        })
+        # Return the PDF file directly as an attachment
+        return send_file(
+            report_path,
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name="satellite_change_report.pdf"
+        )
     else:
         return jsonify({"error": "Failed to generate report"}), 500
 

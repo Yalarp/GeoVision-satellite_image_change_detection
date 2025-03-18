@@ -1,117 +1,94 @@
+Satellite Imagery Analysis and Visualization App
+Overview
+This Flask application allows users to analyze and visualize satellite imagery over a specified area and time range. It provides functionalities to fetch satellite images, generate timelapse GIFs and videos, create PDF reports, and download shapefiles and KML files.
 
-# Satellite Data Viewer
+Features
+Fetch satellite images from Sentinel-2 using specified date ranges and polygon coordinates.
+Generate timelapse GIFs and videos from the fetched images.
+Create detailed PDF reports highlighting vegetation changes, urban development, and water bodies.
+Download shapefiles and KML files of the selected area.
+Interactive map interface for selecting areas of interest.
+Installation
+Prerequisites
+Python 3.x
+Node.js (for frontend dependencies)
+Steps
+Clone the repository:
 
-The Satellite Data Viewer is a web application that allows users to view and analyze satellite imagery for a specified region and date range. The application uses Flask for the backend and Leaflet for the frontend map interface.
+Copy
+git clone https://github.com/yourusername/satellite-imagery-app.git
+cd satellite-imagery-app
+Create a virtual environment and activate it:
 
-## Features
+Copy
+python -m venv venv
+source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+Install the required Python packages:
 
-- View satellite images for a specified region and date range.
-- Generate timelapse GIFs and videos from the fetched images.
-- Download shapefiles and KML files of the selected region.
-- Load and display existing images from the static folder.
-- Enlarge images for better viewing.
+Copy
+pip install -r requirements.txt
+Install frontend dependencies:
 
-## Installation
+Copy
+npm install
+Set up environment variables:
+Create a .env file in the root directory and add your Sentinel API credentials:
 
-### Prerequisites
+Copy
+CLIENT_ID=your_sentinel_client_id
+CLIENT_SECRET=your_sentinel_client_secret
+Running the Application
+Start the Flask server:
 
-- Python 3.x
-- Node.js (for running the frontend)
+Copy
+flask run
+Open the application in your browser:
 
-### Steps
+Copy
+http://127.0.0.1:5000
+Usage
+Select an Area on the Map:
+Use the interactive map to draw a polygon or rectangle over the area of interest.
 
-1. **Clone the Repository**
+Set the Date Range:
+Specify the start and end dates for fetching satellite images.
 
-   ```sh
-   git clone https://github.com/your-username/satellite-data-viewer.git
-   cd satellite-data-viewer
-   ```
+Fetch Images:
+Click the "Get Images" button to fetch satellite images for the selected area and date range.
 
-2. **Set Up the Backend**
+Generate Timelapse GIF/Video:
+Use the "Generate Timelapse GIF" or "Generate Video" buttons to create timelapse visualizations.
 
-   - Create a virtual environment and activate it:
+Create PDF Report:
+Click the "Generate PDF Report" button to generate a detailed analysis report.
 
-     ```sh
-     python -m venv venv
-     source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-     ```
+Download Shapefile/KML:
+Use the "Download Shapefile" or "Download KML" buttons to download the selected area's geospatial data.
 
-   - Install the required Python packages:
+API Endpoints
+/get_images: Fetch satellite images based on polygon coordinates and date range.
+/generate_timelapse: Generate a timelapse GIF from the fetched images.
+/generate_video: Generate a timelapse video from the fetched images.
+/generate_report: Generate a PDF report analyzing the satellite images.
+/download_shapefile: Download the selected area as a shapefile.
+/download_kml: Download the selected area as a KML file.
+/download_media: Download generated media files (GIF, video, PDF).
+Technologies Used
+Backend: Flask, Flask-CORS, Sentinel API
+Frontend: HTML, CSS, JavaScript, Leaflet.js, jQuery
+Image Processing: OpenCV, PIL, imageio
+PDF Generation: ReportLab
+Data Visualization: Matplotlib
+Contributing
+Fork the repository.
+Create a new branch (git checkout -b feature-branch).
+Commit your changes (git commit -am 'Add new feature').
+Push to the branch (git push origin feature-branch).
+Create a new Pull Request.
+License
+This project is licensed under the MIT License. See the LICENSE file for more details.
 
-     ```sh
-     pip install flask requests imageio numpy opencv-python-headless fiona simplekml flask-cors pillow
-     ```
-
-3. **Set Up the Frontend**
-
-   - Ensure you have Node.js installed.
-   - Install the required frontend dependencies (if any).
-
-4. **Run the Application**
-
-   - Start the Flask server:
-
-     ```sh
-     python app.py
-     ```
-
-   - Open your browser and navigate to `http://127.0.0.1:5000` to access the application.
-
-## Usage
-
-1. **Select a Region on the Map**
-
-   - Use the drawing tools to select a region of interest on the map.
-
-2. **Set the Date Range**
-
-   - Enter the start and end dates for which you want to fetch satellite images.
-
-3. **Fetch Images**
-
-   - Click the "Get Images" button to fetch satellite images for the selected region and date range.
-   - The images will be displayed in the gallery section.
-
-4. **Generate Timelapse GIF or Video**
-
-   - Click the "Generate Timelapse GIF" or "Generate Video" button to create a timelapse GIF or video from the fetched images.
-   - The generated timelapse will be displayed in the respective tab.
-
-5. **Download Shapefile or KML**
-
-   - Click the "Download Shapefile" or "Download KML" button to download the selected region as a shapefile or KML file.
-
-6. **Load Existing Images**
-
-   - Click the "Load Existing Images" button to load and display existing images from the static folder.
-
-7. **Enlarge Images**
-
-   - Click on any image in the gallery to enlarge it for better viewing.
-
-## File Structure
-
-- `app.py`: The main Flask application file.
-- `index.html`: The main HTML file for the frontend.
-- `styles.css`: The CSS file for styling the frontend.
-- `static/`: Directory to store static files like images.
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request.
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- [Leaflet](https://leafletjs.com/) for the map interface.
-- [Flask](https://flask.palletsprojects.com/) for the backend framework.
-- [Sentinel Hub](https://www.sentinel-hub.com/) for satellite imagery.
-
-## Contact
-
-For any questions or support, please contact [2706pralay@gmail.com](mailto:2706pralay@gmail.com).
-```
-
+Acknowledgments
+Sentinel-2 for providing high-quality satellite imagery.
+Flask and Flask-CORS for simplifying the backend development.
+Leaflet.js for the interactive map interface.
