@@ -20,6 +20,7 @@ from reportlab.lib.units import inch
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.patches as mpatches
+import random
 
 app = Flask(__name__)
 CORS(app)  # Allow all origins during development
@@ -266,7 +267,7 @@ def generate_change_visualization(before_path, after_path, output_path):
 
     return output_path
 
-# Fetch Satellite Images with Enhanced Processing
+# Modified fetch_satellite_images function with optimized fetching for long time periods
 def fetch_satellite_images(polygon_coords, start_date, end_date):
     token = get_sentinel_token()
     if not token:
@@ -275,71 +276,205 @@ def fetch_satellite_images(polygon_coords, start_date, end_date):
 
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     images = []
-    current_date = datetime.strptime(start_date, "%Y-%m-%d")
-    end_date = datetime.strptime(end_date, "%Y-%m-%d")
 
-    while current_date <= end_date:
-        date_str = current_date.strftime("%Y-%m-%d")
-        print(f"🔍 Trying to fetch image for: {date_str}")
+    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
+    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
 
-        payload = {
-            "input": {
-                "bounds": {"geometry": {"type": "Polygon", "coordinates": polygon_coords}},
-                "data": [
-                    {
-                        "type": "sentinel-2-l2a",  # Higher quality images
-                        "dataFilter": {
-                            "timeRange": {"from": f"{date_str}T00:00:00Z", "to": f"{date_str}T23:59:59Z"},
-                            "maxCloudCoverage": 10  # Maximum cloud cover allowed
+    # Calculate the time difference in months
+    delta_months = (end_date_obj.year - start_date_obj.year) * 12 + (end_date_obj.month - start_date_obj.month)
+
+    # Define time periods to fetch based on timeline length
+    periods_to_fetch = []
+
+    if delta_months > 4:
+        print(f"🔍 Long time period detected ({delta_months} months). Optimizing image fetching.")
+
+        # Calculate middle date
+        middle_date = start_date_obj + (end_date_obj - start_date_obj) / 2
+
+        # Create three time windows: beginning, middle, and end of the timeline
+        beginning_start = start_date_obj
+        beginning_end = beginning_start + timedelta(days=30)  # Fetch from first month
+
+        middle_start = middle_date - timedelta(days=15)
+        middle_end = middle_date + timedelta(days=15)  # Fetch from middle month
+
+        end_start = end_date_obj - timedelta(days=30)
+        end_end = end_date_obj  # Fetch from last month
+
+        periods_to_fetch = [
+            (beginning_start, beginning_end, "beginning"),
+            (middle_start, middle_end, "middle"),
+            (end_start, end_end, "end")
+        ]
+
+        print(f"📅 Fetching images from: Beginning ({beginning_start.strftime('%Y-%m-%d')} to {beginning_end.strftime('%Y-%m-%d')})")
+        print(f"📅 Fetching images from: Middle ({middle_start.strftime('%Y-%m-%d')} to {middle_end.strftime('%Y-%m-%d')})")
+        print(f"📅 Fetching images from: End ({end_start.strftime('%Y-%m-%d')} to {end_end.strftime('%Y-%m-%d')})")
+    else:
+        # For shorter periods, use the original approach with minor optimization
+        periods_to_fetch = [(start_date_obj, end_date_obj, "full")]
+        print(f"📅 Fetching images from entire period: {start_date} to {end_date}")
+
+    # Process each time period
+    for period_start, period_end, period_type in periods_to_fetch:
+        current_date = period_start
+
+        # Determine sampling frequency based on the period type
+        if period_type == "full":
+            # For shorter periods, sample every 3 days
+            sampling_days = 3
+        else:
+            # For specific windows in long periods, sample more frequently
+            sampling_days = 2
+
+        # Maximum images to fetch from each period
+        max_images_per_period = 4
+        images_fetched_in_period = 0
+
+        while current_date <= period_end and images_fetched_in_period < max_images_per_period:
+            date_str = current_date.strftime("%Y-%m-%d")
+            print(f"🔍 Trying to fetch image for: {date_str} (period: {period_type})")
+
+            payload = {
+                "input": {
+                    "bounds": {"geometry": {"type": "Polygon", "coordinates": polygon_coords}},
+                    "data": [
+                        {
+                            "type": "sentinel-2-l2a",  # Higher quality images
+                            "dataFilter": {
+                                "timeRange": {"from": f"{date_str}T00:00:00Z", "to": f"{date_str}T23:59:59Z"},
+                                "maxCloudCoverage": 10  # Maximum cloud cover allowed
+                            }
                         }
+                    ]
+                },
+                "output": {"width": 512, "height": 512, "format": "png"},
+                "evalscript": """
+                    function setup() {
+                        return {
+                            input: ["B04", "B03", "B02"],
+                            output: { bands: 3, sampleType: "UINT8" }
+                        };
                     }
-                ]
-            },
-            "output": {"width": 512, "height": 512, "format": "png"},
-            "evalscript": """
-                function setup() {
-                    return {
-                        input: ["B04", "B03", "B02"],
-                        output: { bands: 3, sampleType: "UINT8" }
-                    };
-                }
-                function evaluatePixel(sample) {
-                    return [
-                        sample.B04 * 255,
-                        sample.B03 * 255,
-                        sample.B02 * 255
-                    ];
-                }
-            """
-        }
+                    function evaluatePixel(sample) {
+                        return [
+                            sample.B04 * 255,
+                            sample.B03 * 255,
+                            sample.B02 * 255
+                        ];
+                    }
+                """
+            }
 
-        try:
-            response = requests.post("https://services.sentinel-hub.com/api/v1/process", headers=headers, json=payload)
-            response.raise_for_status()
+            try:
+                response = requests.post("https://services.sentinel-hub.com/api/v1/process", headers=headers, json=payload)
+                response.raise_for_status()
 
-            img_filename = f"{date_str}.png"
-            img_path = os.path.join("static", img_filename)
+                img_filename = f"{date_str}.png"
+                img_path = os.path.join("static", img_filename)
 
-            with open(img_path, "wb") as img_file:
-                img_file.write(response.content)
+                with open(img_path, "wb") as img_file:
+                    img_file.write(response.content)
 
-            # Check if the image is black
-            if is_black_image(img_path):
-                print(f"⚠️ Black image detected for {date_str}, skipping...")
-                os.remove(img_path)  # Delete black images
-                current_date += timedelta(days=1)  # Move to the next day
+                # Check if the image is black
+                if is_black_image(img_path):
+                    print(f"⚠️ Black image detected for {date_str}, skipping...")
+                    os.remove(img_path)  # Delete black images
+                    current_date += timedelta(days=1)  # Move to the next day
+                    continue
+
+                # Apply Adjustments
+                apply_image_adjustments(img_path)
+
+                images.append(img_filename)
+                print(f"✅ Image saved: {img_path}")
+
+                images_fetched_in_period += 1
+                current_date += timedelta(days=sampling_days)  # Move to next sampling day
+
+            except requests.exceptions.RequestException as e:
+                print(f"❌ API Error for {date_str}: {e}")
+                current_date += timedelta(days=1)  # Try the next day instead of skipping
+
+    # Ensure we have enough images for analysis
+    if len(images) < 4:
+        print(f"⚠️ Only fetched {len(images)} images. Attempting to fill gaps...")
+
+        # If we don't have enough images, try to fill gaps by sampling more dates
+        additional_attempts = 0
+        max_additional_attempts = 10
+
+        while len(images) < 4 and additional_attempts < max_additional_attempts:
+            # Pick a random date within the time range
+            random_days = random.randint(0, (end_date_obj - start_date_obj).days)
+            random_date = start_date_obj + timedelta(days=random_days)
+            date_str = random_date.strftime("%Y-%m-%d")
+
+            # Check if we already have this image
+            if f"{date_str}.png" in images:
+                additional_attempts += 1
                 continue
 
-            # Apply Adjustments
-            apply_image_adjustments(img_path)
+            print(f"🔍 Attempting to fetch additional image for: {date_str}")
 
-            images.append(img_filename)
-            print(f"✅ Image saved: {img_path}")
+            # Same payload as above
+            payload = {
+                "input": {
+                    "bounds": {"geometry": {"type": "Polygon", "coordinates": polygon_coords}},
+                    "data": [
+                        {
+                            "type": "sentinel-2-l2a",
+                            "dataFilter": {
+                                "timeRange": {"from": f"{date_str}T00:00:00Z", "to": f"{date_str}T23:59:59Z"},
+                                "maxCloudCoverage": 15  # Slightly higher cloud coverage allowed for filling gaps
+                            }
+                        }
+                    ]
+                },
+                "output": {"width": 512, "height": 512, "format": "png"},
+                "evalscript": """
+                    function setup() {
+                        return {
+                            input: ["B04", "B03", "B02"],
+                            output: { bands: 3, sampleType: "UINT8" }
+                        };
+                    }
+                    function evaluatePixel(sample) {
+                        return [
+                            sample.B04 * 255,
+                            sample.B03 * 255,
+                            sample.B02 * 255
+                        ];
+                    }
+                """
+            }
 
-            current_date += timedelta(days=3)  # Increase frequency for more images
-        except requests.exceptions.RequestException as e:
-            print(f"❌ API Error for {date_str}: {e}")
-            current_date += timedelta(days=1)  # Try the next day instead of skipping
+            try:
+                response = requests.post("https://services.sentinel-hub.com/api/v1/process", headers=headers, json=payload)
+                response.raise_for_status()
+
+                img_filename = f"{date_str}.png"
+                img_path = os.path.join("static", img_filename)
+
+                with open(img_path, "wb") as img_file:
+                    img_file.write(response.content)
+
+                if not is_black_image(img_path):
+                    apply_image_adjustments(img_path)
+                    images.append(img_filename)
+                    print(f"✅ Additional image saved: {img_path}")
+                else:
+                    print(f"⚠️ Black image detected for {date_str}, skipping...")
+                    os.remove(img_path)
+            except:
+                print(f"❌ Failed to fetch additional image for {date_str}")
+
+            additional_attempts += 1
+
+    # Sort images chronologically
+    images.sort()
+    print(f"📊 Total images fetched: {len(images)}")
 
     return images
 
