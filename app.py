@@ -11,7 +11,15 @@ import fiona.crs
 import simplekml
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageDraw, ImageFont
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Image as ReportLabImage, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+import matplotlib.patches as mpatches
 
 app = Flask(__name__)
 CORS(app)  # Allow all origins during development
@@ -70,6 +78,193 @@ def apply_image_adjustments(image_path):
     # Convert back to PIL Image and Save
     img = Image.fromarray(img_cv)
     img.save(image_path)
+
+# Function to detect changes between two satellite images
+def detect_changes(before_image_path, after_image_path):
+    """
+    Detects changes between two satellite images and returns a change mask
+    highlighting vegetation, urban development, and water bodies.
+    """
+    # Read images
+    before_img = cv2.imread(before_image_path)
+    after_img = cv2.imread(after_image_path)
+
+    # Convert to same size if different
+    if before_img.shape != after_img.shape:
+        after_img = cv2.resize(after_img, (before_img.shape[1], before_img.shape[0]))
+
+    # Convert to HSV color space for better color analysis
+    before_hsv = cv2.cvtColor(before_img, cv2.COLOR_BGR2HSV)
+    after_hsv = cv2.cvtColor(after_img, cv2.COLOR_BGR2HSV)
+
+    # Create masks for each category
+    # Vegetation: Focus on green colors
+    lower_green = np.array([35, 50, 50])
+    upper_green = np.array([90, 255, 255])
+    before_veg_mask = cv2.inRange(before_hsv, lower_green, upper_green)
+    after_veg_mask = cv2.inRange(after_hsv, lower_green, upper_green)
+
+    # Urban/Built-up: Focus on grayscale values (buildings, roads)
+    before_gray = cv2.cvtColor(before_img, cv2.COLOR_BGR2GRAY)
+    after_gray = cv2.cvtColor(after_img, cv2.COLOR_BGR2GRAY)
+    before_urban_mask = cv2.adaptiveThreshold(before_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                           cv2.THRESH_BINARY, 11, 2)
+    after_urban_mask = cv2.adaptiveThreshold(after_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                          cv2.THRESH_BINARY, 11, 2)
+
+    # Water bodies: Focus on blue colors
+    lower_blue = np.array([90, 50, 50])
+    upper_blue = np.array([130, 255, 255])
+    before_water_mask = cv2.inRange(before_hsv, lower_blue, upper_blue)
+    after_water_mask = cv2.inRange(after_hsv, lower_blue, upper_blue)
+
+    # Detect changes
+    veg_change = cv2.bitwise_xor(before_veg_mask, after_veg_mask)
+    urban_change = cv2.bitwise_xor(before_urban_mask, after_urban_mask)
+    water_change = cv2.bitwise_xor(before_water_mask, after_water_mask)
+
+    # Create a composite change mask
+    change_mask = np.zeros((before_img.shape[0], before_img.shape[1], 3), dtype=np.uint8)
+
+    # Green for vegetation changes
+    change_mask[veg_change > 0] = [0, 255, 0]
+
+    # Red for urban changes
+    change_mask[urban_change > 0] = [255, 0, 0]
+
+    # Blue for water changes
+    change_mask[water_change > 0] = [0, 0, 255]
+
+    # Apply morphological operations to clean up the mask
+    kernel = np.ones((3, 3), np.uint8)
+    change_mask = cv2.morphologyEx(change_mask, cv2.MORPH_OPEN, kernel)
+    change_mask = cv2.morphologyEx(change_mask, cv2.MORPH_CLOSE, kernel)
+
+    return change_mask
+
+# Function to create an overlay image with changes highlighted
+def create_overlay_image(image_path, change_mask, output_path, alpha=0.5):
+    """
+    Creates an overlay image with changes highlighted on the original image.
+    """
+    # Read original image
+    original = cv2.imread(image_path)
+
+    # Create a copy of the original image
+    overlay = original.copy()
+
+    # Apply the change mask to the overlay
+    overlay = cv2.addWeighted(overlay, 1 - alpha, change_mask, alpha, 0)
+
+    # Add a legend to the image
+    # Convert from BGR to RGB for PIL
+    overlay_rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
+    overlay_pil = Image.fromarray(overlay_rgb)
+    draw = ImageDraw.Draw(overlay_pil)
+
+    # Add legend
+    legend_height = 20
+    legend_width = 150
+    legend_margin = 10
+
+    # Draw legend box
+    draw.rectangle(
+        [(legend_margin, legend_margin),
+         (legend_margin + legend_width, legend_margin + 3 * legend_height)],
+        fill=(255, 255, 255, 180),
+        outline=(0, 0, 0)
+    )
+
+    # Add legend items
+    try:
+        # Try to use a system font
+        font = ImageFont.truetype("Arial", 12)
+    except IOError:
+        # Fallback to default font
+        font = ImageFont.load_default()
+
+    # Legend items
+    draw.rectangle(
+        [(legend_margin + 5, legend_margin + 5),
+         (legend_margin + 15, legend_margin + 15)],
+        fill=(0, 255, 0)
+    )
+    draw.text((legend_margin + 20, legend_margin + 2), "Vegetation", font=font, fill=(0, 0, 0))
+
+    draw.rectangle(
+        [(legend_margin + 5, legend_margin + legend_height + 5),
+         (legend_margin + 15, legend_margin + legend_height + 15)],
+        fill=(255, 0, 0)
+    )
+    draw.text((legend_margin + 20, legend_margin + legend_height + 2), "Urban", font=font, fill=(0, 0, 0))
+
+    draw.rectangle(
+        [(legend_margin + 5, legend_margin + 2 * legend_height + 5),
+         (legend_margin + 15, legend_margin + 2 * legend_height + 15)],
+        fill=(0, 0, 255)
+    )
+    draw.text((legend_margin + 20, legend_margin + 2 * legend_height + 2), "Water", font=font, fill=(0, 0, 0))
+
+    # Convert back to OpenCV format and save
+    overlay = cv2.cvtColor(np.array(overlay_pil), cv2.COLOR_RGB2BGR)
+    cv2.imwrite(output_path, overlay)
+
+    return output_path
+
+# Function to generate advanced visualization using matplotlib
+def generate_change_visualization(before_path, after_path, output_path):
+    """
+    Generates a more advanced visualization showing before/after with changes highlighted.
+    """
+    # Read images
+    before_img = cv2.imread(before_path)
+    after_img = cv2.imread(after_path)
+    before_rgb = cv2.cvtColor(before_img, cv2.COLOR_BGR2RGB)
+    after_rgb = cv2.cvtColor(after_img, cv2.COLOR_BGR2RGB)
+
+    # Detect changes
+    change_mask = detect_changes(before_path, after_path)
+    change_mask_rgb = cv2.cvtColor(change_mask, cv2.COLOR_BGR2RGB)
+
+    # Create a figure with three subplots
+    plt.figure(figsize=(15, 5))
+
+    # Plot before image
+    plt.subplot(1, 3, 1)
+    plt.imshow(before_rgb)
+    plt.title('Before')
+    plt.axis('off')
+
+    # Plot after image
+    plt.subplot(1, 3, 2)
+    plt.imshow(after_rgb)
+    plt.title('After')
+    plt.axis('off')
+
+    # Plot change mask
+    plt.subplot(1, 3, 3)
+
+    # Create a blended image
+    alpha = 0.7
+    blended = cv2.addWeighted(after_rgb, 1 - alpha, change_mask_rgb, alpha, 0)
+    plt.imshow(blended)
+    plt.title('Change Analysis')
+    plt.axis('off')
+
+    # Add a legend
+    legend_elements = [
+        mpatches.Patch(color='green', label='Vegetation'),
+        mpatches.Patch(color='red', label='Urban'),
+        mpatches.Patch(color='blue', label='Water')
+    ]
+    plt.legend(handles=legend_elements, loc='lower right')
+
+    # Save the figure
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    return output_path
 
 # Fetch Satellite Images with Enhanced Processing
 def fetch_satellite_images(polygon_coords, start_date, end_date):
@@ -211,6 +406,208 @@ def create_video(image_filenames, output_path="static/timelapse.mp4", fps=2):
     except Exception as e:
         print(f"❌ Error creating video: {e}")
         return None
+
+# Modified function to generate PDF report with change analysis
+def generate_pdf_report(image_filenames, polygon_coords, start_date, end_date):
+    """
+    Generate a PDF report showing satellite imagery changes with analysis overlays
+    """
+    if not image_filenames or len(image_filenames) < 4:
+        print("❌ Not enough images to generate a report")
+        return None
+
+    # Sort images by date
+    image_filenames.sort()
+
+    # Select the first and last images for change analysis
+    first_image = image_filenames[0]
+    last_image = image_filenames[-1]
+
+    # Select images for display
+    first_image_path = os.path.join("static", first_image)
+    last_image_path = os.path.join("static", last_image)
+
+    # Generate change analysis visualization
+    analysis_path = os.path.join("static", "change_analysis.png")
+    generate_change_visualization(first_image_path, last_image_path, analysis_path)
+
+    # Create overlays for each pair of images
+    middle_idx = len(image_filenames) // 2
+    second_image = image_filenames[middle_idx // 2]
+    third_image = image_filenames[middle_idx]
+    fourth_image = image_filenames[-1]
+
+    # Generate overlays
+    overlay1_path = os.path.join("static", "overlay1.png")
+    overlay2_path = os.path.join("static", "overlay2.png")
+
+    # Create overlays between first and middle, and middle and last images
+    first_middle_mask = detect_changes(
+        os.path.join("static", first_image),
+        os.path.join("static", third_image)
+    )
+    middle_last_mask = detect_changes(
+        os.path.join("static", third_image),
+        os.path.join("static", fourth_image)
+    )
+
+    create_overlay_image(
+        os.path.join("static", third_image),
+        first_middle_mask,
+        overlay1_path
+    )
+    create_overlay_image(
+        os.path.join("static", fourth_image),
+        middle_last_mask,
+        overlay2_path
+    )
+
+    # Set up the PDF document - use landscape orientation
+    report_path = "static/satellite_report.pdf"
+    doc = SimpleDocTemplate(
+        report_path,
+        pagesize=landscape(letter),
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36
+    )
+
+    # Create styles
+    styles = getSampleStyleSheet()
+    title_style = styles['Heading1']
+    title_style.alignment = 1  # Center alignment
+    subtitle_style = styles['Heading2']
+    subtitle_style.alignment = 1
+    normal_style = styles['Normal']
+
+    # Create a style for Arabic text if needed
+    arabic_style = ParagraphStyle(
+        'ArabicStyle',
+        parent=styles['Normal'],
+        alignment=2,  # Right alignment for Arabic
+        fontName='Helvetica-Bold',
+        fontSize=12
+    )
+
+    # Create a footer style
+    footer_style = ParagraphStyle(
+        'FooterStyle',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.gray
+    )
+
+    # Create PDF content
+    content = []
+
+    # Add title
+    content.append(Paragraph("Satellite Imagery Change Analysis Report", title_style))
+    content.append(Spacer(1, 0.25*inch))
+
+    # Add date information and coordinates in a table format
+    report_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Create header information table
+    header_data = [
+        ["Report Generated:", report_date, "Analysis Period:", f"{start_date} to {end_date}"],
+        ["Location:", f"Coordinates: {polygon_coords[0][0]}", "Analysis Type:", "Vegetation, Urban, Water Changes"]
+    ]
+
+    header_table = Table(header_data, colWidths=[1.5*inch, 2.5*inch, 1.5*inch, 2.5*inch])
+    header_table.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        ('BACKGROUND', (2, 0), (2, -1), colors.lightgrey),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+    ]))
+
+    content.append(header_table)
+    content.append(Spacer(1, 0.5*inch))
+
+    # Add the analysis visualization
+    content.append(Paragraph("Satellite Image Change Analysis Overview", subtitle_style))
+    content.append(Spacer(1, 0.25*inch))
+
+    # Add the analysis image
+    if os.path.exists(analysis_path):
+        analysis_img = ReportLabImage(analysis_path, width=8*inch, height=2.5*inch)
+        content.append(analysis_img)
+    else:
+        content.append(Paragraph("Analysis visualization could not be generated", normal_style))
+
+    content.append(Spacer(1, 0.5*inch))
+
+    # Add detailed change analysis
+    content.append(Paragraph("Detailed Change Analysis", subtitle_style))
+    content.append(Spacer(1, 0.25*inch))
+
+    # Create a table for the detailed images
+    image_table_data = [
+        [Paragraph(f"Base Image ({first_image.replace('.png', '')})", normal_style),
+         Paragraph(f"Mid-Period Changes ({third_image.replace('.png', '')})", normal_style)],
+        [ReportLabImage(os.path.join("static", first_image), width=4*inch, height=3*inch),
+         ReportLabImage(overlay1_path, width=4*inch, height=3*inch)],
+        [Paragraph(f"Mid-Period Image ({third_image.replace('.png', '')})", normal_style),
+         Paragraph(f"Latest Period Changes ({fourth_image.replace('.png', '')})", normal_style)],
+        [ReportLabImage(os.path.join("static", third_image), width=4*inch, height=3*inch),
+         ReportLabImage(overlay2_path, width=4*inch, height=3*inch)]
+    ]
+
+    image_table = Table(image_table_data, colWidths=[4.5*inch, 4.5*inch])
+    image_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('BACKGROUND', (0, 2), (-1, 2), colors.lightgrey),
+    ]))
+
+    content.append(image_table)
+    content.append(Spacer(1, 0.5*inch))
+
+    # Add analysis legend
+    content.append(Paragraph("Change Analysis Legend", subtitle_style))
+
+    legend_data = [
+        ["Color", "Change Type", "Description"],
+        ["Green", "Vegetation Changes", "Areas where vegetation has increased or decreased"],
+        ["Red", "Urban Development", "New construction, buildings, or infrastructure"],
+        ["Blue", "Water Bodies", "Changes in water levels, reservoirs, or water features"]
+    ]
+
+    legend_table = Table(legend_data, colWidths=[1*inch, 2*inch, 6*inch])
+    legend_table.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('BACKGROUND', (0, 1), (0, 1), colors.green),
+        ('BACKGROUND', (0, 2), (0, 2), colors.red),
+        ('BACKGROUND', (0, 3), (0, 3), colors.blue),
+    ]))
+
+    content.append(legend_table)
+
+    # Add a footer with disclaimer
+    disclaimer_text = "Disclaimer: This is not an official map. The satellite imagery and analysis are for informational purposes only."
+    footer_text = f"{disclaimer_text} | Generated using Sentinel-2 imagery | Analysis period: {start_date} to {end_date}"
+
+    def add_footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont('Helvetica', 8)
+        canvas.setFillColor(colors.grey)
+        canvas.drawString(inch, 0.5*inch, footer_text)
+        canvas.restoreState()
+
+    # Build the PDF with the footer function
+    doc.build(content, onFirstPage=add_footer, onLaterPages=add_footer)
+    print(f"✅ PDF report generated: {report_path}")
+    return report_path
 
 # Endpoint to Get Images
 @app.route("/get_images", methods=["POST"])
@@ -392,8 +789,8 @@ def download_kml():
     except Exception as e:
         print(f"Error creating KML: {e}")
         return jsonify({"error": "Failed to create KML"}), 500
-        # Add this new endpoint to your Flask application (app.py)
 
+# Endpoint to list existing images
 @app.route("/list_existing_images", methods=["GET"])
 def list_existing_images():
     try:
@@ -422,6 +819,49 @@ def list_existing_images():
         print(f"Error listing existing images: {e}")
         return jsonify({"error": "Failed to list existing images"}), 500
 
+# Modify the generate_report endpoint to use the enhanced function
+@app.route("/generate_report", methods=["POST"])
+def generate_report():
+    data = request.json
+    polygon = data.get("polygon")
+    start_date = data.get("start_date")
+    end_date = data.get("end_date")
+    existing_images = data.get("existing_images")
+
+    if not polygon or not start_date or not end_date:
+        return jsonify({"error": "Missing required parameters"}), 400
+
+    # Use existing images if provided, otherwise fetch new ones
+    image_filenames = existing_images or fetch_satellite_images(polygon, start_date, end_date)
+
+    if not image_filenames or len(image_filenames) < 4:
+        return jsonify({"error": "Not enough images found for change analysis"}), 404
+
+    # Generate the enhanced PDF report
+    report_path = generate_pdf_report(image_filenames, polygon, start_date, end_date)
+
+    if report_path and os.path.exists(report_path):
+        return jsonify({
+            "success": True,
+            "report_url": "/static/satellite_report.pdf"
+        })
+    else:
+        return jsonify({"error": "Failed to generate report"}), 500
+
+# Endpoint to download the PDF report
+@app.route("/download_report", methods=["GET"])
+def download_report():
+    report_path = "static/satellite_report.pdf"
+
+    if not os.path.exists(report_path):
+        return jsonify({"error": "Report not found"}), 404
+
+    return send_file(
+        report_path,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="satellite_change_report.pdf"
+    )
 
 if __name__ == "__main__":
     app.run(debug=True)

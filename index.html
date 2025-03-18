@@ -28,9 +28,11 @@
             <input type="date" id="end-date">
 
             <div>
+                <button id="load-existing" class="btn">Load Existing Images</button>
                 <button id="get-data" class="btn">Get Images</button>
                 <button id="visualize-data" class="btn">Generate Timelapse GIF</button>
                 <button id="generate-video" class="btn">Generate Video</button>
+                <button id="generate-report" class="btn">Generate PDF Report</button>
                 <button id="download-shapefile" class="btn">Download Shapefile</button>
                 <button id="download-kml" class="btn">Download KML</button>
             </div>
@@ -51,6 +53,7 @@
                 <button class="tab-btn active" data-tab="images">Images</button>
                 <button class="tab-btn" data-tab="timelapse">Timelapse</button>
                 <button class="tab-btn" data-tab="video">Video</button>
+                <button class="tab-btn" data-tab="report">Report</button>
             </div>
 
             <div class="tab-content">
@@ -92,6 +95,19 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- PDF Report Tab -->
+                <div id="report-tab" class="tab-pane">
+                    <div id="report-container" class="media-container">
+                        <p class="text-gray-400 italic mb-4">Generate a PDF report showing before and after analysis by clicking the "Generate PDF Report" button.</p>
+                        <iframe id="pdf-viewer" src="" width="100%" height="600px" class="hidden"></iframe>
+                        <div class="media-controls">
+                            <button id="download-report" class="download-btn" disabled>
+                                <i class="fas fa-download"></i> Download PDF Report
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -124,19 +140,23 @@
             }),
             "Google Streets": L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
                 maxZoom: 20,
-                subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+                subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+                apiKey: 'YOUR_GOOGLE_MAPS_API_KEY' // Replace with your Google Maps API key
             }),
             "Google Hybrid": L.tileLayer('https://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}', {
                 maxZoom: 20,
-                subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+                subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+                apiKey: 'YOUR_GOOGLE_MAPS_API_KEY' // Replace with your Google Maps API key
             }),
             "Google Satellite": L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
                 maxZoom: 20,
-                subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+                subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+                apiKey: 'YOUR_GOOGLE_MAPS_API_KEY' // Replace with your Google Maps API key
             }),
             "Google Terrain": L.tileLayer('https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', {
                 maxZoom: 20,
-                subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+                subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+                apiKey: 'YOUR_GOOGLE_MAPS_API_KEY' // Replace with your Google Maps API key
             })
         };
 
@@ -328,7 +348,6 @@
                     console.error("Error loading existing images:", error);
                 });
         }
-
 
         // Add a "Load Existing Images" button to the controls div
         function addLoadExistingButton() {
@@ -740,6 +759,120 @@
                 });
         }
 
+        // Generate PDF Report button click handler
+        document.getElementById("generate-report").addEventListener("click", function (event) {
+            event.preventDefault(); // Prevent form submission
+            if (fetchedImages.length > 0) {
+                // Use existing images
+                generateReportFromExisting();
+            } else if (validateInputs()) {
+                // Need to fetch images first
+                generateReportFromScratch();
+            }
+        });
+
+        function generateReportFromExisting() {
+            showLoading(true);
+
+            const polygon = getPolygonGeoJSON();
+            const startDate = document.getElementById("start-date").value;
+            const endDate = document.getElementById("end-date").value;
+
+            fetch("http://127.0.0.1:5000/generate_report", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    polygon: polygon.geometry.coordinates,
+                    start_date: startDate,
+                    end_date: endDate,
+                    existing_images: fetchedImages
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Server returned " + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    showLoading(false);
+
+                    if (data.success && data.report_url) {
+                        // Switch to report tab
+                        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+                        document.querySelector('[data-tab="report"]').classList.add('active');
+                        document.getElementById("report-tab").classList.add('active');
+
+                        // Show PDF in iframe with timestamp parameter to prevent caching
+                        const pdfViewer = document.getElementById("pdf-viewer");
+                        pdfViewer.src = `http://127.0.0.1:5000${data.report_url}?t=${new Date().getTime()}`;
+                        pdfViewer.classList.remove("hidden");
+                        document.getElementById("download-report").disabled = false;
+                    } else {
+                        showError("Failed to generate PDF report.");
+                    }
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError("Error generating PDF report: " + error.message);
+                    console.error("Error generating PDF report:", error);
+                });
+        }
+
+        function generateReportFromScratch() {
+            const startDate = document.getElementById("start-date").value;
+            const endDate = document.getElementById("end-date").value;
+            const polygon = getPolygonGeoJSON();
+
+            showLoading(true);
+
+            fetch("http://127.0.0.1:5000/generate_report", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    polygon: polygon.geometry.coordinates,
+                    start_date: startDate,
+                    end_date: endDate
+                })
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Server returned " + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    showLoading(false);
+
+                    if (data.success && data.report_url) {
+                        // Store fetched images for later use
+                        if (data.images) {
+                            fetchedImages = data.images;
+                        }
+
+                        // Switch to report tab
+                        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+                        document.querySelector('[data-tab="report"]').classList.add('active');
+                        document.getElementById("report-tab").classList.add('active');
+
+                        // Show PDF in iframe with timestamp parameter to prevent caching
+                        const pdfViewer = document.getElementById("pdf-viewer");
+                        pdfViewer.src = `http://127.0.0.1:5000${data.report_url}?t=${new Date().getTime()}`;
+                        pdfViewer.classList.remove("hidden");
+                        document.getElementById("download-report").disabled = false;
+                    } else {
+                        showError("Failed to generate PDF report.");
+                    }
+                })
+                .catch(error => {
+                    showLoading(false);
+                    showError("Error generating PDF report: " + error.message);
+                    console.error("Error generating PDF report:", error);
+                });
+        }
+
         // Modified Download buttons
         document.getElementById("download-gif").addEventListener("click", function (event) {
             event.preventDefault();
@@ -749,6 +882,11 @@
         document.getElementById("download-video").addEventListener("click", function (event) {
             event.preventDefault();
             window.open("http://127.0.0.1:5000/download_media?type=video", "_blank");
+        });
+
+        document.getElementById("download-report").addEventListener("click", function (event) {
+            event.preventDefault();
+            window.open("http://127.0.0.1:5000/download_report", "_blank");
         });
 
         document.getElementById("download-shapefile").addEventListener("click", function (event) {
