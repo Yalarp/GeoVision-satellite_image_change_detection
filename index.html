@@ -34,6 +34,7 @@
                 <button id="generate-report" class="btn">Generate PDF Report</button>
                 <button id="download-shapefile" class="btn">Download Shapefile</button>
                 <button id="download-kml" class="btn">Download KML</button>
+                
             </div>
         </div>
 
@@ -98,8 +99,7 @@
                 <!-- PDF Report Tab -->
                 <div id="report-tab" class="tab-pane">
                     <div id="report-container" class="media-container">
-                        <p class="text-gray-400 italic mb-4">Generate a PDF report showing before and after analysis by
-                            clicking the "Generate PDF Report" button.</p>
+                        <p class="text-gray-400 italic mb-4">Generate a PDF report showing before and after analysis by clicking the "Generate PDF Report" button.</p>
                         <iframe id="pdf-viewer" src="" width="100%" height="600px" class="hidden"></iframe>
                         <div class="media-controls">
                             <button id="download-report" class="download-btn" disabled>
@@ -349,7 +349,24 @@
                 });
         }
 
+        // Add a "Load Existing Images" button to the controls div
+        function addLoadExistingButton() {
+            const controlsDiv = document.querySelector(".controls > div");
 
+            if (controlsDiv) {
+                const loadButton = document.createElement("button");
+                loadButton.id = "load-existing";
+                loadButton.className = "btn";
+                loadButton.textContent = "Load Existing Images";
+                loadButton.addEventListener("click", function (event) {
+                    event.preventDefault();
+                    loadExistingImages();
+                });
+
+                // Insert as the first button
+                controlsDiv.insertBefore(loadButton, controlsDiv.firstChild);
+            }
+        }
 
         // Call this when the page loads
         document.addEventListener("DOMContentLoaded", function () {
