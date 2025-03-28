@@ -1,7 +1,7 @@
 # Satellite Imagery Analysis and Visualization App
 
 ## Overview
-This Flask application enables users to analyze and visualize satellite imagery over a specified area and time range. It provides functionalities to:
+ This Flask application enables users to analyze and visualize satellite imagery over a specified area and time range. It provides functionalities to:
 - Fetch satellite images
 - Generate timelapse GIFs and videos
 - Create PDF reports
